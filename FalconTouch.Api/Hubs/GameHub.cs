@@ -1,22 +1,22 @@
-﻿using FalconTouch.Domain.Entities;
-using FalconTouch.Infrastructure.Data;
+﻿using FalconTouch.Application.Games;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 
 namespace FalconTouch.Api.Hubs;
 
 [Authorize]
 public class GameHub : Hub
 {
-    private readonly FalconTouchDbContext _db;
+    private readonly IGameService _gameService;
+
     private static readonly object _lock = new();
     private static int? _winnerButtonIndex = null;
     private static bool _gameStarted = false;
+    private static int _currentGameId;
 
-    public GameHub(FalconTouchDbContext db)
+    public GameHub(IGameService gameService)
     {
-        _db = db;
+        _gameService = gameService;
     }
 
     public override async Task OnConnectedAsync()
@@ -28,28 +28,30 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task StartGame(int numberOfButtons)
     {
+        // chama a camada de aplicação pra criar o Game no banco
+        var result = await _gameService.StartGameAsync(numberOfButtons);
+
+        if (!result.Success || result.Value is null)
+        {
+            await Clients.Caller.SendAsync("GameStartError", result.Error ?? "Erro ao iniciar jogo.");
+            return;
+        }
+
         lock (_lock)
         {
             _winnerButtonIndex = Random.Shared.Next(0, numberOfButtons);
             _gameStarted = true;
+            _currentGameId = result.Value.GameId;
         }
-
-        var game = new Game
-        {
-            StartedAt = DateTime.UtcNow,
-            IsActive = true
-        };
-        _db.Games.Add(game);
-        await _db.SaveChangesAsync();
 
         await Clients.All.SendAsync("GameStarted", new
         {
-            gameId = game.Id,
-            buttons = numberOfButtons
+            gameId = result.Value.GameId,
+            buttons = result.Value.NumberOfButtons
         });
     }
 
-    public async Task ClickButton(int gameId, int buttonIndex)
+    public async Task ClickButton(int buttonIndex)
     {
         if (!_gameStarted || _winnerButtonIndex is null)
         {
@@ -57,59 +59,34 @@ public class GameHub : Hub
             return;
         }
 
-        var userId = int.Parse(Context.User!.FindFirst("sub")!.Value);
-
-        Game? game;
+        int gameId;
+        int? winnerButtonIndex;
         lock (_lock)
         {
-            game = _db.Games.FirstOrDefault(g => g.Id == gameId && g.IsActive);
-            if (game is null) return;
-
-            // registra click
-            var now = DateTime.UtcNow;
-            var reactionMs = (int)(now - game.StartedAt).TotalMilliseconds;
-
-            var click = new GameClick
-            {
-                GameId = game.Id,
-                UserId = userId,
-                ButtonIndex = buttonIndex,
-                ClickedAt = now,
-                ReactionTimeMs = reactionMs
-            };
-            _db.GameClicks.Add(click);
-            _db.SaveChanges();
-
-            // se acertou e ainda não tinha vencedor
-            if (buttonIndex == _winnerButtonIndex && game.WinnerId is null)
-            {
-                game.WinnerId = userId;
-                game.IsActive = false;
-                game.FinishedAt = now;
-                _db.SaveChanges();
-            }
+            gameId = _currentGameId;
+            winnerButtonIndex = _winnerButtonIndex;
         }
 
-        // Atualiza ranking top 10
-        var ranking = await _db.GameClicks
-            .Where(gc => gc.GameId == gameId)
-            .OrderBy(gc => gc.ReactionTimeMs)
-            .Take(10)
-            .Select(gc => new
-            {
-                gc.UserId,
-                gc.ReactionTimeMs
-            })
-            .ToListAsync();
+        var userId = int.Parse(Context.User!.FindFirst("sub")!.Value);
 
-        await Clients.All.SendAsync("RankingUpdated", ranking);
+        var result = await _gameService.RegisterClickAsync(gameId, userId, buttonIndex);
 
-        if (game!.WinnerId is not null && buttonIndex == _winnerButtonIndex)
+        if (!result.Success || result.Value is null)
+        {
+            await Clients.Caller.SendAsync("ClickRejected", result.Error ?? "Erro ao registrar clique.");
+            return;
+        }
+
+        // Atualiza ranking
+        await Clients.All.SendAsync("RankingUpdated", result.Value);
+
+        // Verifica vencedor (apenas a lógica do botão premiado fica no Hub)
+        if (buttonIndex == winnerButtonIndex)
         {
             await Clients.All.SendAsync("WinnerConfirmed", new
             {
                 gameId,
-                winnerId = game.WinnerId,
+                winnerId = userId
             });
 
             lock (_lock)
@@ -117,6 +94,9 @@ public class GameHub : Hub
                 _gameStarted = false;
                 _winnerButtonIndex = null;
             }
+
+            // Quando quiser, você pode criar um método no GameService pra fechar o jogo e gravar WinnerId.
+            // Ex: await _gameService.FinishGameAsync(gameId, userId);
         }
     }
 }
