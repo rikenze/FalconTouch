@@ -1,11 +1,10 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+﻿using FalconTouch.Domain.Entities;
+using FalconTouch.Domain.Repositories;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using FalconTouch.Domain.Entities;
-using FalconTouch.Infrastructure.Data;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 
 namespace FalconTouch.Api.Controllers;
 
@@ -13,19 +12,19 @@ namespace FalconTouch.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private readonly FalconTouchDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IUserRepository _userRepository;
 
-    public AuthController(FalconTouchDbContext db, IConfiguration config)
+    public AuthController(IUserRepository userRepository, IConfiguration config)
     {
-        _db = db;
         _config = config;
+        _userRepository = userRepository;
     }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest request)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
+        if (await _userRepository.UserExistsAsync(request.Email))
             return BadRequest("Email já cadastrado.");
 
         var user = new User
@@ -35,8 +34,7 @@ public class AuthController : ControllerBase
             Role = "Player"
         };
 
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        await _userRepository.AddUserAsync(user);
 
         return Ok();
     }
@@ -44,7 +42,7 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(u => u.Email == request.Email);
+        var user = await _userRepository.GetUserByEmailAsync(request.Email);
         if (user is null)
             return Unauthorized();
 

@@ -1,9 +1,11 @@
 using FalconTouch.Api.Hubs;
 using FalconTouch.Application.Games;
 using FalconTouch.Application.Payments;
+using FalconTouch.Domain.Repositories;
 using FalconTouch.Infrastructure.Data;
 using FalconTouch.Infrastructure.Games;
 using FalconTouch.Infrastructure.Payments;
+using FalconTouch.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -19,6 +21,9 @@ builder.Services.AddDbContext<FalconTouchDbContext>(options =>
 
 builder.Services.AddScoped<IGameService, GameService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
+
+// Repositories
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 // Redis (StackExchange.Redis)
 builder.Services.AddStackExchangeRedisCache(options =>
