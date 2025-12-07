@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Npgsql;
+using System.Net.Sockets;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -112,6 +114,42 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 var app = builder.Build();
+
+// aplica migrations com retry
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<FalconTouchDbContext>();
+
+    const int maxRetries = 5;
+    var retries = 0;
+
+    while (true)
+    {
+        try
+        {
+            db.Database.Migrate();
+            break;
+        }
+        catch (NpgsqlException ex)
+        {
+            retries++;
+            if (retries >= maxRetries)
+                throw;
+
+            Console.WriteLine($"[MIGRATION] Postgres ainda não respondeu. Tentativa {retries}/{maxRetries}. Erro: {ex.Message}");
+            Thread.Sleep(TimeSpan.FromSeconds(5));
+        }
+        catch (SocketException ex)
+        {
+            retries++;
+            if (retries >= maxRetries)
+                throw;
+
+            Console.WriteLine($"[MIGRATION] Falha de socket ao conectar no Postgres. Tentativa {retries}/{maxRetries}. Erro: {ex.Message}");
+            Thread.Sleep(TimeSpan.FromSeconds(5));
+        }
+    }
+}
 
 if (app.Environment.IsDevelopment())
 {

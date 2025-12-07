@@ -29,11 +29,11 @@ services:
     ports:
       - "5001:8080"
 
-  angular:
-    build:
-      context: .
-      dockerfile: angular.Dockerfile
-    depends_on:
-      - api
-    ports:
-      - "4200:80"
+  # angular:
+  #   build:
+  #     context: .
+  #     dockerfile: angular.Dockerfile
+  #   depends_on:
+  #     - api
+  #   ports:
+  #     - "4200:80"
