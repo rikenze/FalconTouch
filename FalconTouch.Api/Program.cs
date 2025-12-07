@@ -19,12 +19,6 @@ var config = builder.Configuration;
 builder.Services.AddDbContext<FalconTouchDbContext>(options =>
     options.UseNpgsql(config.GetConnectionString("Postgres")));
 
-builder.Services.AddScoped<IGameService, GameService>();
-builder.Services.AddScoped<IPaymentService, PaymentService>();
-
-// Repositories
-builder.Services.AddScoped<IUserRepository, UserRepository>();
-
 // Redis (StackExchange.Redis)
 builder.Services.AddStackExchangeRedisCache(options =>
 {
@@ -100,7 +94,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// CORS para o teu Angular
+// CORS para Angular
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend",
@@ -111,7 +105,11 @@ builder.Services.AddCors(options =>
             .AllowCredentials());
 });
 
-// Serviços de domínio/app (ex: IGameService, IPaymentService) – você pode ir adicionando
+builder.Services.AddScoped<IGameService, GameService>();
+builder.Services.AddScoped<IPaymentService, PaymentService>();
+
+// Repositories
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 var app = builder.Build();
 

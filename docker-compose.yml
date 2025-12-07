@@ -19,9 +19,9 @@ services:
       dockerfile: docker/api.Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Postgres: "Host=postgres;Database=falcontouch_db;Username=falcontouch;Password=falcontouch"
+      ConnectionStrings__Postgres: "${POSTGRES_CONN}"
       ConnectionStrings__Redis: "redis:6379"
-      Jwt__Key: "CHAVE_MUITO_GRANDE_ALEATORIA"
+      Jwt__Key: "${JWT__KEY}"
       Jwt__Issuer: "FalconTouch.Api"
     depends_on:
       - postgres
