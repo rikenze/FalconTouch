@@ -15,8 +15,8 @@ services:
 
   api:
     build:
-      context: ..
-      dockerfile: docker/api.Dockerfile
+      context: .
+      dockerfile: api.Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgres: "${POSTGRES_CONN}"
@@ -31,8 +31,8 @@ services:
 
   angular:
     build:
-      context: ..
-      dockerfile: docker/angular.Dockerfile
+      context: .
+      dockerfile: angular.Dockerfile
     depends_on:
       - api
     ports:
