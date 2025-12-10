@@ -18,11 +18,12 @@ services:
       context: .
       dockerfile: api.Dockerfile
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT}"
       ConnectionStrings__Postgres: "${POSTGRES_CONN}"
       ConnectionStrings__Redis: "redis:6379"
       Jwt__Key: "${JWT__KEY}"
       Jwt__Issuer: "FalconTouch.Api"
+      Swagger__Enabled: ${Swagger_Enabled}
     depends_on:
       - postgres
       - redis
