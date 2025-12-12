@@ -26,6 +26,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8447882C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FalconTouch.UnitTest", "FalconTouch.UnitTest\FalconTouch.UnitTest.csproj", "{2CC2F7ED-9FAC-4DFA-89E9-AD37B64FDF22}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "infra", "infra", "{0542B2A5-885F-4246-B4E4-CE4C3FB66D13}"
+	ProjectSection(SolutionItems) = preProject
+		infra\main.tf = infra\main.tf
+		infra\outputs.tf = infra\outputs.tf
+		infra\variables.tf = infra\variables.tf
+		infra\terraform.tfvars = infra\terraform.tfvars
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
