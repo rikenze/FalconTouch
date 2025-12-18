@@ -1,4 +1,4 @@
-﻿using FalconTouch.Application.Common;
+using FalconTouch.Application.Common;
 using FalconTouch.Application.Games;
 using FalconTouch.Domain.Entities;
 using FalconTouch.Infrastructure.Data;
@@ -20,12 +20,23 @@ public class GameService : IGameService
         CancellationToken cancellationToken = default)
     {
         if (numberOfButtons <= 0)
-            return Result<GameStartResult>.Fail("Número de botões inválido.");
+            return Result<GameStartResult>.Fail("Numero de botoes invalido.");
+
+        var activeGames = await _db.Games
+            .Where(g => g.IsActive)
+            .ToListAsync(cancellationToken);
+
+        foreach (var active in activeGames)
+        {
+            active.IsActive = false;
+            active.FinishedAt = DateTime.UtcNow;
+        }
 
         var game = new Game
         {
             StartedAt = DateTime.UtcNow,
-            IsActive = true
+            IsActive = true,
+            NumberOfButtons = numberOfButtons
         };
 
         _db.Games.Add(game);
@@ -51,7 +62,7 @@ public class GameService : IGameService
             cancellationToken);
 
         if (game is null)
-            return Result<IReadOnlyList<RankingItemDto>>.Fail("Jogo não encontrado ou já finalizado.");
+            return Result<IReadOnlyList<RankingItemDto>>.Fail("Jogo nao encontrado ou ja finalizado.");
 
         var now = DateTime.UtcNow;
         var reactionMs = (int)(now - game.StartedAt).TotalMilliseconds;

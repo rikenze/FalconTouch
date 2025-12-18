@@ -1,51 +1,218 @@
-﻿using FalconTouch.Domain.Entities;
+using FalconTouch.Domain.Entities;
 using FalconTouch.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using FalconTouch.Api.Hubs;
 
 namespace FalconTouch.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/payments")]
 [Authorize]
 public class PaymentsController : ControllerBase
 {
     private readonly FalconTouchDbContext _db;
+    private readonly IHubContext<GameHub> _hub;
 
-    public PaymentsController(FalconTouchDbContext db)
+    public PaymentsController(FalconTouchDbContext db, IHubContext<GameHub> hub)
     {
         _db = db;
+        _hub = hub;
     }
 
-    [HttpPost("create-pix")]
-    public async Task<IActionResult> CreatePix([FromBody] CreatePaymentRequest request)
+    [HttpGet("check-payment")]
+    public async Task<IActionResult> CheckPayment()
     {
         var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var user = await _db.Users.FindAsync(userId);
+        if (user is null) return NotFound(new { message = "Usuario nao encontrado." });
 
-        // TODO: chamar SDK/HTTP da Efi (Gerencianet) e criar cobrança Pix
-        var providerPaymentId = Guid.NewGuid().ToString(); // mock
+        if (user.Role == "Admin") return Ok(new { hasPaid = true });
+
+        var game = await GetOrCreateCurrentGameAsync();
+        var hasPaid = await _db.Payments.AnyAsync(p =>
+            p.UserId == userId &&
+            p.GameId == game.Id &&
+            p.Status == PaymentStatus.Paid);
+
+        return Ok(new { hasPaid });
+    }
+
+    [HttpPost("pix")]
+    public async Task<IActionResult> CreatePix([FromBody] PixRequest request)
+    {
+        var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var game = await GetOrCreateCurrentGameAsync();
+        if (!game.IsActive)
+            return BadRequest(new { message = "Nenhum jogo ativo no momento." });
+
+        var providerPaymentId = Guid.NewGuid().ToString("N");
 
         var payment = new Payment
         {
             UserId = userId,
+            GameId = game.Id,
             Amount = request.Amount,
             Provider = "Efi",
             ProviderPaymentId = providerPaymentId,
             Status = PaymentStatus.Pending,
-            CouponCode = request.CouponCode
+            CouponCode = request.CouponCode,
+            InfluencerId = request.InfluencerId,
+            CommissionAmount = request.CommissionAmount,
+            DiscountPercent = request.DiscountPercent
         };
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync();
 
-        // TODO: retornar qrcode/link vindo da Efi
+        // TODO: integrar com a Efi para gerar QRCode real.
         return Ok(new
         {
-            paymentId = payment.Id,
-            providerPaymentId,
-            // pixQrCode = ...
+            txid = providerPaymentId,
+            qrcode = "pix-qr-code-placeholder",
+            imagemQrcode = "pix-qr-image-placeholder"
         });
+    }
+
+    [HttpPost("create-payment-intent")]
+    public async Task<IActionResult> CreatePaymentIntent([FromBody] PaymentIntentRequest request)
+    {
+        if (request.Amount <= 0)
+            return BadRequest(new { message = "Valor invalido." });
+
+        // TODO: integrar com Stripe e retornar clientSecret real.
+        var clientSecret = $"mock_{Guid.NewGuid():N}";
+        return Ok(new { clientSecret });
+    }
+
+    [HttpPost("confirm-card")]
+    public async Task<IActionResult> ConfirmCardPayment([FromBody] ConfirmCardPaymentRequest request)
+    {
+        var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var game = await GetOrCreateCurrentGameAsync();
+        if (!game.IsActive)
+            return BadRequest(new { message = "Nenhum jogo ativo no momento." });
+
+        var payment = new Payment
+        {
+            UserId = userId,
+            GameId = game.Id,
+            Amount = request.Amount,
+            Provider = "Stripe",
+            ProviderPaymentId = request.ProviderPaymentId ?? Guid.NewGuid().ToString("N"),
+            Status = PaymentStatus.Paid,
+            CouponCode = request.CouponCode,
+            InfluencerId = request.InfluencerId,
+            CommissionAmount = request.CommissionAmount,
+            DiscountPercent = request.DiscountPercent,
+            PaidAt = DateTime.UtcNow
+        };
+
+        _db.Payments.Add(payment);
+        await _db.SaveChangesAsync();
+
+        await UpsertDeliveryInfoAsync(userId, game.Id, request.Delivery);
+
+        var paidCount = await _db.Payments.CountAsync(p =>
+            p.GameId == game.Id && p.Status == PaymentStatus.Paid);
+
+        await _hub.Clients.All.SendAsync("PlayersPaidCountUpdated", new
+        {
+            current = paidCount,
+            min = game.MinPlayers
+        });
+
+        return Ok(new { message = "Pagamento confirmado e salvo com sucesso." });
+    }
+
+    [HttpGet("pix/status/{txid}")]
+    public async Task<IActionResult> GetPixStatus([FromRoute] string txid)
+    {
+        var payment = await _db.Payments
+            .FirstOrDefaultAsync(p => p.Provider == "Efi" && p.ProviderPaymentId == txid);
+
+        return Ok(new { paid = payment?.Status == PaymentStatus.Paid });
+    }
+
+    private async Task<Game> GetOrCreateCurrentGameAsync()
+    {
+        var game = await _db.Games
+            .OrderByDescending(g => g.Id)
+            .FirstOrDefaultAsync();
+
+        if (game is not null) return game;
+
+        var created = new Game
+        {
+            StartedAt = DateTime.UtcNow,
+            IsActive = false,
+            MinPlayers = 1000,
+            Price = 12.00m
+        };
+
+        _db.Games.Add(created);
+        await _db.SaveChangesAsync();
+
+        return created;
+    }
+
+    private async Task UpsertDeliveryInfoAsync(int userId, int gameId, DeliveryInfoRequest delivery)
+    {
+        var existing = await _db.DeliveryInfos
+            .FirstOrDefaultAsync(d => d.UserId == userId && d.GameId == gameId);
+
+        if (existing is null)
+        {
+            _db.DeliveryInfos.Add(new DeliveryInfo
+            {
+                UserId = userId,
+                GameId = gameId,
+                Street = delivery.Street,
+                Number = delivery.Number,
+                Neighborhood = delivery.Neighborhood,
+                City = delivery.City,
+                State = delivery.State,
+                ZipCode = delivery.ZipCode
+            });
+        }
+        else
+        {
+            existing.Street = delivery.Street;
+            existing.Number = delivery.Number;
+            existing.Neighborhood = delivery.Neighborhood;
+            existing.City = delivery.City;
+            existing.State = delivery.State;
+            existing.ZipCode = delivery.ZipCode;
+        }
+
+        await _db.SaveChangesAsync();
     }
 }
 
-public record CreatePaymentRequest(decimal Amount, string? CouponCode);
+public record PixRequest(
+    decimal Amount,
+    string? CouponCode,
+    int? InfluencerId,
+    decimal? DiscountPercent,
+    decimal? CommissionAmount);
+
+public record PaymentIntentRequest(int Amount);
+
+public record DeliveryInfoRequest(
+    string Street,
+    string Number,
+    string Neighborhood,
+    string City,
+    string State,
+    string ZipCode);
+
+public record ConfirmCardPaymentRequest(
+    decimal Amount,
+    DeliveryInfoRequest Delivery,
+    string? CouponCode,
+    int? InfluencerId,
+    decimal? DiscountPercent,
+    decimal? CommissionAmount,
+    string? ProviderPaymentId);

@@ -1,16 +1,12 @@
 ﻿using FalconTouch.Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 namespace FalconTouch.Domain.Repositories
 {
     public interface IUserRepository
     {
         Task AddUserAsync(User user);
         Task<User?> GetUserByEmailAsync(string email);
+        Task<User?> GetUserByIdAsync(int id);
+        Task UpdateUserAsync(User user);
         Task<bool> UserExistsAsync(string email);
     }
 }

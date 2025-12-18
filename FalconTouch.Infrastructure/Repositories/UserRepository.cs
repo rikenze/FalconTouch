@@ -25,6 +25,17 @@ namespace FalconTouch.Infrastructure.Repositories
             return await _db.Users.SingleOrDefaultAsync(u => u.Email == email);
         }
 
+        public async Task<User?> GetUserByIdAsync(int id)
+        {
+            return await _db.Users.FindAsync(id);
+        }
+
+        public async Task UpdateUserAsync(User user)
+        {
+            _db.Users.Update(user);
+            await _db.SaveChangesAsync();
+        }
+
         public async Task<bool> UserExistsAsync(string email)
         {
             return await _db.Users.AnyAsync(u => u.Email == email);
