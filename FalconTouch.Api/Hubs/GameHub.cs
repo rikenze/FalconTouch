@@ -93,7 +93,9 @@ public class GameHub : Hub
 
     public async Task<DeliveryInfoDto?> GetDeliveryInfo()
     {
-        var userId = int.Parse(Context.User!.FindFirst("sub")!.Value);
+        var userIdClaim = Context.User?.FindFirst("sub")?.Value ?? Context.User?.FindFirst("id")?.Value;
+        if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            return null;
         var game = await GetOrCreateCurrentGameAsync();
 
         var delivery = await _db.DeliveryInfos

@@ -25,7 +25,12 @@ public class PaymentsController : ControllerBase
     [HttpGet("check-payment")]
     public async Task<IActionResult> CheckPayment()
     {
-        var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var idClaim = User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (idClaim == null || !int.TryParse(idClaim.Value, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid or missing user id claim." });
+        }
+
         var user = await _db.Users.FindAsync(userId);
         if (user is null) return NotFound(new { message = "Usuario nao encontrado." });
 
@@ -43,7 +48,12 @@ public class PaymentsController : ControllerBase
     [HttpPost("pix")]
     public async Task<IActionResult> CreatePix([FromBody] PixRequest request)
     {
-        var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var idClaim = User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (idClaim == null || !int.TryParse(idClaim.Value, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid or missing user id claim." });
+        }
+
         var game = await GetOrCreateCurrentGameAsync();
         if (!game.IsActive)
             return BadRequest(new { message = "Nenhum jogo ativo no momento." });
@@ -90,7 +100,12 @@ public class PaymentsController : ControllerBase
     [HttpPost("confirm-card")]
     public async Task<IActionResult> ConfirmCardPayment([FromBody] ConfirmCardPaymentRequest request)
     {
-        var userId = int.Parse(User.FindFirst("sub")!.Value);
+        var idClaim = User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (idClaim == null || !int.TryParse(idClaim.Value, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid or missing user id claim." });
+        }
+
         var game = await GetOrCreateCurrentGameAsync();
         if (!game.IsActive)
             return BadRequest(new { message = "Nenhum jogo ativo no momento." });
