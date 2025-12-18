@@ -27,9 +27,7 @@ public class AuthController : ControllerBase
         if (await _userRepository.UserExistsAsync(request.Email))
             return BadRequest("Email já cadastrado.");
 
-        var cpf = request.CPF
-            .Replace(".", "")
-            .Replace("-", "");
+        var cpf = new string(request.CPF.Where(Char.IsDigit).ToArray());
 
         var user = new User
         {
