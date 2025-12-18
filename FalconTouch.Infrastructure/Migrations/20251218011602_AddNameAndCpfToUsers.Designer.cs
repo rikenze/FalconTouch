@@ -3,6 +3,7 @@ using System;
 using FalconTouch.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FalconTouch.Infrastructure.Migrations
 {
     [DbContext(typeof(FalconTouchDbContext))]
-    partial class FalconTouchDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251218011602_AddNameAndCpfToUsers")]
+    partial class AddNameAndCpfToUsers
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

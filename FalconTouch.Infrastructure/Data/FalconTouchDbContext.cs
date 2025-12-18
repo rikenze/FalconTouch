@@ -19,9 +19,23 @@ public class FalconTouchDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<User>()
-            .HasIndex(u => u.Email)
-            .IsUnique();
+        modelBuilder.Entity<User>(e =>
+        {
+            e.Property(u => u.Name)
+                .IsRequired()
+                .HasMaxLength(120);
+
+            e.Property(u => u.Email)
+                .IsRequired()
+                .HasMaxLength(180);
+
+            e.Property(u => u.CPF)
+                .IsRequired()
+                .HasMaxLength(11);
+
+            e.HasIndex(u => u.Email).IsUnique();
+            e.HasIndex(u => u.CPF).IsUnique();
+        });
 
         modelBuilder.Entity<GameClick>()
             .HasOne(gc => gc.Game)

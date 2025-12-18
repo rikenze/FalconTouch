@@ -27,9 +27,15 @@ public class AuthController : ControllerBase
         if (await _userRepository.UserExistsAsync(request.Email))
             return BadRequest("Email já cadastrado.");
 
+        var cpf = request.CPF
+            .Replace(".", "")
+            .Replace("-", "");
+
         var user = new User
         {
+            Name = request.Name,
             Email = request.Email,
+            CPF = cpf,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "Player"
         };
@@ -79,5 +85,5 @@ public class AuthController : ControllerBase
     }
 }
 
-public record RegisterRequest(string Email, string Password);
+public record RegisterRequest(string Name, string Email, string CPF, string Password);
 public record LoginRequest(string Email, string Password);
