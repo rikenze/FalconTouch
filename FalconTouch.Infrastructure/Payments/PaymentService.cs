@@ -79,6 +79,6 @@ public class PaymentService : IPaymentService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return Result.Ok();
+        return Result.Ok(string.Empty);
     }
 }

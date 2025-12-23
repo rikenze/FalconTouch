@@ -1,7 +1,9 @@
 using FalconTouch.Api.Hubs;
+using FalconTouch.Application.Auth;
 using FalconTouch.Application.Games;
 using FalconTouch.Application.Payments;
 using FalconTouch.Domain.Repositories;
+using FalconTouch.Infrastructure.Auth;
 using FalconTouch.Infrastructure.Data;
 using FalconTouch.Infrastructure.Games;
 using FalconTouch.Infrastructure.Payments;
@@ -109,6 +111,7 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<IGameService, GameService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Repositories
 builder.Services.AddScoped<IUserRepository, UserRepository>();
