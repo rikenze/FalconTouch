@@ -1,18 +1,18 @@
 using FalconTouch.Application.Common;
 using FalconTouch.Application.Games;
 using FalconTouch.Domain.Entities;
-using FalconTouch.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace FalconTouch.Infrastructure.Games;
 
 public class GameService : IGameService
 {
-    private readonly FalconTouchDbContext _db;
+    private readonly IGameRepository _repository;
+    private readonly IGameEventPublisher _eventPublisher;
 
-    public GameService(FalconTouchDbContext db)
+    public GameService(IGameRepository repository, IGameEventPublisher eventPublisher)
     {
-        _db = db;
+        _repository = repository;
+        _eventPublisher = eventPublisher;
     }
 
     public async Task<Result<GameStartResult>> StartGameAsync(
@@ -22,25 +22,21 @@ public class GameService : IGameService
         if (numberOfButtons <= 0)
             return Result<GameStartResult>.Fail("Numero de botoes invalido.");
 
-        var activeGames = await _db.Games
-            .Where(g => g.IsActive)
-            .ToListAsync(cancellationToken);
+        var activeGames = await _repository.GetActiveAsync(cancellationToken);
 
         foreach (var active in activeGames)
         {
-            active.IsActive = false;
-            active.FinishedAt = DateTime.UtcNow;
+            active.Deactivate(DateTime.UtcNow);
         }
 
-        var game = new Game
-        {
-            StartedAt = DateTime.UtcNow,
-            IsActive = true,
-            NumberOfButtons = numberOfButtons
-        };
+        var game = Game.Create(numberOfButtons, DateTime.UtcNow);
 
-        _db.Games.Add(game);
-        await _db.SaveChangesAsync(cancellationToken);
+        await _repository.AddAsync(game, cancellationToken);
+        await _repository.SaveChangesAsync(cancellationToken);
+
+        await _eventPublisher.PublishAsync(
+            new FalconTouch.Domain.Events.GameStartedEvent(game.Id, numberOfButtons),
+            cancellationToken);
 
         var result = new GameStartResult(
             game.Id,
@@ -57,38 +53,23 @@ public class GameService : IGameService
         int buttonIndex,
         CancellationToken cancellationToken = default)
     {
-        var game = await _db.Games.FirstOrDefaultAsync(
-            g => g.Id == gameId && g.IsActive,
-            cancellationToken);
+        var game = await _repository.GetActiveByIdAsync(gameId, cancellationToken);
 
         if (game is null)
             return Result<IReadOnlyList<RankingItemDto>>.Fail("Jogo nao encontrado ou ja finalizado.");
 
-        var now = DateTime.UtcNow;
-        var reactionMs = (int)(now - game.StartedAt).TotalMilliseconds;
+        var click = game.RegisterClick(userId, buttonIndex, DateTime.UtcNow);
 
-        var click = new GameClick
+        await _repository.AddClickAsync(click, cancellationToken);
+        await _repository.SaveChangesAsync(cancellationToken);
+
+        foreach (var domainEvent in game.DomainEvents)
         {
-            GameId = game.Id,
-            UserId = userId,
-            ButtonIndex = buttonIndex,
-            ClickedAt = now,
-            ReactionTimeMs = reactionMs
-        };
+            await _eventPublisher.PublishAsync(domainEvent, cancellationToken);
+        }
+        game.ClearDomainEvents();
 
-        _db.GameClicks.Add(click);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        var ranking = await _db.GameClicks
-            .Where(gc => gc.GameId == gameId)
-            .OrderBy(gc => gc.ReactionTimeMs)
-            .Take(10)
-            .Select(gc => new RankingItemDto(
-                gc.UserId,
-                gc.User.Email,
-                gc.ReactionTimeMs
-            ))
-            .ToListAsync(cancellationToken);
+        var ranking = await _repository.GetRankingAsync(gameId, 10, cancellationToken);
 
         return Result<IReadOnlyList<RankingItemDto>>.Ok(ranking);
     }

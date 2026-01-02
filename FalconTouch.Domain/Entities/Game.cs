@@ -1,4 +1,6 @@
-﻿namespace FalconTouch.Domain.Entities;
+using FalconTouch.Domain.Events;
+
+namespace FalconTouch.Domain.Entities;
 
 public class Game
 {
@@ -16,4 +18,62 @@ public class Game
 
     public ICollection<GameClick> Clicks { get; set; } = new List<GameClick>();
     public Prize? Prize { get; set; }
+    private readonly List<IDomainEvent> _domainEvents = new();
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+
+    public static Game Create(int numberOfButtons, DateTime now)
+    {
+        if (numberOfButtons <= 0)
+            throw new ArgumentException("Number of buttons must be greater than zero.");
+
+        return new Game
+        {
+            StartedAt = now,
+            IsActive = true,
+            NumberOfButtons = numberOfButtons
+        };
+    }
+
+    public void Deactivate(DateTime finishedAt, int? winnerId = null)
+    {
+        IsActive = false;
+        FinishedAt = finishedAt;
+        WinnerId = winnerId;
+    }
+
+    public GameClick RegisterClick(int userId, int buttonIndex, DateTime now)
+    {
+        if (!IsActive)
+            throw new InvalidOperationException("Game is not active.");
+
+        var reactionMs = (int)(now - StartedAt).TotalMilliseconds;
+
+        var click = new GameClick
+        {
+            Game = this,
+            UserId = userId,
+            ButtonIndex = buttonIndex,
+            ClickedAt = now,
+            ReactionTimeMs = reactionMs
+        };
+
+        _domainEvents.Add(new GameClickRegisteredEvent(
+            Id,
+            userId,
+            buttonIndex,
+            reactionMs));
+
+        return click;
+    }
+
+    public void AddDomainEvent(IDomainEvent domainEvent)
+    {
+        _domainEvents.Add(domainEvent);
+    }
+
+    public void ClearDomainEvents()
+    {
+        _domainEvents.Clear();
+    }
 }
+

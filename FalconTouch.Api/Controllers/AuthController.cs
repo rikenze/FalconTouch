@@ -54,7 +54,6 @@ public class AuthController : ControllerBase
 
         var token = GeneratePasswordResetToken(user);
 
-        // TODO: enviar email com o token. Por enquanto, apenas retorna OK.
         return Ok(new { message = "Email de recuperação enviado.", token });
     }
 

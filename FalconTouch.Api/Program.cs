@@ -1,3 +1,4 @@
+using FalconTouch.Api.Events;
 using FalconTouch.Api.Hubs;
 using FalconTouch.Application.Auth;
 using FalconTouch.Application.Games;
@@ -110,6 +111,8 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddScoped<IGameService, GameService>();
+builder.Services.AddScoped<IGameRepository, GameRepository>();
+builder.Services.AddScoped<IGameEventPublisher, SignalRGameEventPublisher>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
