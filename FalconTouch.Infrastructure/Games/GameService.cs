@@ -30,7 +30,7 @@ public class GameService : IGameService
         }
 
         var game = Game.Create(numberOfButtons, DateTime.UtcNow);
-
+        
         await _repository.AddAsync(game, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
 

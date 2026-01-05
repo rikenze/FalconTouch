@@ -48,11 +48,7 @@ public class GameHub : Hub
             _currentGameId = result.Value.GameId;
         }
 
-        await Clients.All.SendAsync("GameStarted", new
-        {
-            gameId = result.Value.GameId,
-            buttons = result.Value.NumberOfButtons
-        });
+        // Evento GameStarted e enviado via Domain Events
     }
 
     public async Task<GameStatusDto> GetGameStatus()
