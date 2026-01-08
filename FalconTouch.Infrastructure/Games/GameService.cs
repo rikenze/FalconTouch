@@ -1,6 +1,7 @@
 using FalconTouch.Application.Common;
 using FalconTouch.Application.Games;
 using FalconTouch.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace FalconTouch.Infrastructure.Games;
 
@@ -8,11 +9,13 @@ public class GameService : IGameService
 {
     private readonly IGameRepository _repository;
     private readonly IGameEventPublisher _eventPublisher;
+    private readonly ILogger<GameService> _logger;
 
-    public GameService(IGameRepository repository, IGameEventPublisher eventPublisher)
+    public GameService(IGameRepository repository, IGameEventPublisher eventPublisher, ILogger<GameService> logger)
     {
         _repository = repository;
         _eventPublisher = eventPublisher;
+        _logger = logger;
     }
 
     public async Task<Result<GameStartResult>> StartGameAsync(
@@ -22,6 +25,7 @@ public class GameService : IGameService
         if (numberOfButtons <= 0)
             return Result<GameStartResult>.Fail("Numero de botoes invalido.");
 
+        _logger.LogInformation("Starting game. Buttons={Buttons}", numberOfButtons);
         var activeGames = await _repository.GetActiveAsync(cancellationToken);
 
         foreach (var active in activeGames)
@@ -38,6 +42,7 @@ public class GameService : IGameService
             new FalconTouch.Domain.Events.GameStartedEvent(game.Id, numberOfButtons),
             cancellationToken);
 
+        _logger.LogInformation("Game started. GameId={GameId}", game.Id);
         var result = new GameStartResult(
             game.Id,
             numberOfButtons,
@@ -58,6 +63,7 @@ public class GameService : IGameService
         if (game is null)
             return Result<IReadOnlyList<RankingItemDto>>.Fail("Jogo nao encontrado ou ja finalizado.");
 
+        _logger.LogDebug("Registering click. GameId={GameId}, UserId={UserId}, ButtonIndex={ButtonIndex}", gameId, userId, buttonIndex);
         var click = game.RegisterClick(userId, buttonIndex, DateTime.UtcNow);
 
         await _repository.AddClickAsync(click, cancellationToken);

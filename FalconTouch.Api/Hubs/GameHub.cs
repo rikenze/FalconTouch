@@ -4,6 +4,7 @@ using FalconTouch.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FalconTouch.Api.Hubs;
 
@@ -12,131 +13,184 @@ public class GameHub : Hub
 {
     private readonly IGameService _gameService;
     private readonly FalconTouchDbContext _db;
+    private readonly ILogger<GameHub> _logger;
 
     private static readonly object _lock = new();
     private static int? _winnerButtonIndex = null;
     private static bool _gameStarted = false;
     private static int _currentGameId;
 
-    public GameHub(IGameService gameService, FalconTouchDbContext db)
+    public GameHub(IGameService gameService, FalconTouchDbContext db, ILogger<GameHub> logger)
     {
         _gameService = gameService;
         _db = db;
+        _logger = logger;
     }
 
     public override async Task OnConnectedAsync()
     {
         await base.OnConnectedAsync();
+        _logger.LogInformation("SignalR connected. ConnectionId={ConnectionId}", Context.ConnectionId);
         await Clients.All.SendAsync("PlayerConnected", Context.UserIdentifier);
     }
 
     [Authorize(Roles = "Admin")]
     public async Task StartGame(int numberOfButtons)
     {
-        var result = await _gameService.StartGameAsync(numberOfButtons);
-
-        if (!result.Success || result.Value is null)
+        _logger.LogInformation("StartGame requested. Buttons={Buttons}, User={UserId}", numberOfButtons, Context.UserIdentifier);
+        try
         {
-            await Clients.Caller.SendAsync("GameStartError", result.Error ?? "Erro ao iniciar jogo.");
-            return;
-        }
+            var result = await _gameService.StartGameAsync(numberOfButtons);
 
-        lock (_lock)
+            if (!result.Success || result.Value is null)
+            {
+                _logger.LogWarning("StartGame failed: {Error}", result.Error);
+                await Clients.Caller.SendAsync("GameStartError", result.Error ?? "Erro ao iniciar jogo.");
+                return;
+            }
+
+            lock (_lock)
+            {
+                _winnerButtonIndex = Random.Shared.Next(0, numberOfButtons);
+                _gameStarted = true;
+                _currentGameId = result.Value.GameId;
+            }
+
+            // Evento GameStarted e enviado via Domain Events
+        }
+        catch (Exception ex)
         {
-            _winnerButtonIndex = Random.Shared.Next(0, numberOfButtons);
-            _gameStarted = true;
-            _currentGameId = result.Value.GameId;
+            _logger.LogError(ex, "StartGame failed unexpectedly.");
+            throw;
         }
-
-        // Evento GameStarted e enviado via Domain Events
     }
 
     public async Task<GameStatusDto> GetGameStatus()
     {
+        _logger.LogDebug("GetGameStatus requested.");
         var game = await GetOrCreateCurrentGameAsync();
         return new GameStatusDto(game.IsActive);
     }
 
     public async Task<PublicGameDto> GetPublicGame()
     {
-        var game = await GetOrCreateCurrentGameAsync();
-        var prize = await EnsurePrizeAsync(game.Id);
+        _logger.LogDebug("GetPublicGame requested.");
+        try
+        {
+            var game = await GetOrCreateCurrentGameAsync();
+            var prize = await EnsurePrizeAsync(game.Id);
 
-        var images = prize.Images
-            .Select(img => new PrizeImageDto(
-                img.Id,
-                $"data:image/jpeg;base64,{Convert.ToBase64String(img.Image)}"))
-            .ToList();
+            var images = prize.Images
+                .Select(img => new PrizeImageDto(
+                    img.Id,
+                    $"data:image/jpeg;base64,{Convert.ToBase64String(img.Image)}"))
+                .ToList();
 
-        return new PublicGameDto(prize.Description, images);
+            return new PublicGameDto(prize.Description, images);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetPublicGame failed.");
+            throw;
+        }
     }
 
     public async Task<CurrentGameDto> GetCurrentGame()
     {
-        var game = await GetOrCreateCurrentGameAsync();
-        var paidCount = await _db.Payments
-            .CountAsync(p => p.GameId == game.Id && p.Status == PaymentStatus.Paid);
+        _logger.LogDebug("GetCurrentGame requested.");
+        try
+        {
+            var game = await GetOrCreateCurrentGameAsync();
+            var paidCount = await _db.Payments
+                .CountAsync(p => p.GameId == game.Id && p.Status == PaymentStatus.Paid);
 
-        return new CurrentGameDto(
-            game.Id,
-            game.IsActive,
-            game.Price,
-            game.MinPlayers,
-            paidCount,
-            game.NumberOfButtons
-        );
+            return new CurrentGameDto(
+                game.Id,
+                game.IsActive,
+                game.Price,
+                game.MinPlayers,
+                paidCount,
+                game.NumberOfButtons
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetCurrentGame failed.");
+            throw;
+        }
     }
 
     public async Task<DeliveryInfoDto?> GetDeliveryInfo()
     {
-        var userIdClaim = Context.User?.FindFirst("sub")?.Value ?? Context.User?.FindFirst("id")?.Value;
-        if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
-            return null;
-        var game = await GetOrCreateCurrentGameAsync();
+        try
+        {
+            var userIdClaim = Context.User?.FindFirst("sub")?.Value ?? Context.User?.FindFirst("id")?.Value;
+            if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                _logger.LogWarning("GetDeliveryInfo: missing user claim.");
+                return null;
+            }
+            var game = await GetOrCreateCurrentGameAsync();
 
-        var delivery = await _db.DeliveryInfos
-            .FirstOrDefaultAsync(d => d.UserId == userId && d.GameId == game.Id);
+            var delivery = await _db.DeliveryInfos
+                .FirstOrDefaultAsync(d => d.UserId == userId && d.GameId == game.Id);
 
-        if (delivery is null) return null;
+            if (delivery is null) return null;
 
-        return new DeliveryInfoDto(
-            delivery.Street,
-            delivery.Number,
-            delivery.Neighborhood,
-            delivery.City,
-            delivery.State,
-            delivery.ZipCode
-        );
+            return new DeliveryInfoDto(
+                delivery.Street,
+                delivery.Number,
+                delivery.Neighborhood,
+                delivery.City,
+                delivery.State,
+                delivery.ZipCode
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetDeliveryInfo failed.");
+            throw;
+        }
     }
 
     public async Task<CouponValidationDto> ValidateCoupon(string code)
     {
-        if (string.IsNullOrWhiteSpace(code))
+        _logger.LogDebug("ValidateCoupon requested. Code={Code}", code);
+        try
         {
-            return new CouponValidationDto(false, "Cupom invalido.", null, 0, 0, 0);
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                return new CouponValidationDto(false, "Cupom invalido.", null, 0, 0, 0);
+            }
+
+            var influencer = await _db.Influencers
+                .FirstOrDefaultAsync(i => i.Code == code.ToLower() && i.Active);
+
+            if (influencer is null)
+                return new CouponValidationDto(false, "Cupom invalido ou inativo.", null, 0, 0, 0);
+
+            var game = await GetOrCreateCurrentGameAsync();
+            var discount = influencer.DiscountPercent;
+            var original = game.Price;
+            var discounted = Math.Round(original * (1 - discount / 100), 2);
+
+            var commission = influencer.CommissionType == "per_player"
+                ? influencer.CommissionValue
+                : 0;
+
+            return new CouponValidationDto(true, null, influencer.Id, discounted, discount, commission);
         }
-
-        var influencer = await _db.Influencers
-            .FirstOrDefaultAsync(i => i.Code == code.ToLower() && i.Active);
-
-        if (influencer is null)
-            return new CouponValidationDto(false, "Cupom invalido ou inativo.", null, 0, 0, 0);
-
-        var game = await GetOrCreateCurrentGameAsync();
-        var discount = influencer.DiscountPercent;
-        var original = game.Price;
-        var discounted = Math.Round(original * (1 - discount / 100), 2);
-
-        var commission = influencer.CommissionType == "per_player"
-            ? influencer.CommissionValue
-            : 0;
-
-        return new CouponValidationDto(true, null, influencer.Id, discounted, discount, commission);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ValidateCoupon failed.");
+            throw;
+        }
     }
 
     [Authorize(Roles = "Admin")]
     public async Task<IReadOnlyList<InfluencerDto>> GetInfluencers()
     {
+        _logger.LogDebug("GetInfluencers requested.");
         var game = await GetOrCreateCurrentGameAsync();
 
         var influencers = await _db.Influencers
@@ -179,6 +233,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<InfluencerDto> CreateInfluencer(InfluencerInputDto input)
     {
+        _logger.LogInformation("CreateInfluencer requested. Code={Code}", input.Code);
         var influencer = new Influencer
         {
             Name = input.Name,
@@ -200,6 +255,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<InfluencerDto> UpdateInfluencer(int id, InfluencerInputDto input)
     {
+        _logger.LogInformation("UpdateInfluencer requested. Id={Id}", id);
         var influencer = await _db.Influencers.FindAsync(id);
         if (influencer is null)
             throw new HubException("Influenciador nao encontrado.");
@@ -221,6 +277,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<bool> DeleteInfluencer(int id)
     {
+        _logger.LogInformation("DeleteInfluencer requested. Id={Id}", id);
         var influencer = await _db.Influencers.FindAsync(id);
         if (influencer is null) return false;
 
@@ -233,6 +290,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<AdminConfigDto> GetAdminConfig()
     {
+        _logger.LogDebug("GetAdminConfig requested.");
         var game = await GetOrCreateCurrentGameAsync();
         var prize = await EnsurePrizeAsync(game.Id);
 
@@ -247,6 +305,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<AdminConfigDto> UpdateAdminConfig(AdminConfigInputDto input)
     {
+        _logger.LogInformation("UpdateAdminConfig requested. MinPlayers={MinPlayers}", input.MinPlayers);
         var game = await GetOrCreateCurrentGameAsync();
         game.MinPlayers = input.MinPlayers;
         game.Price = input.Price;
@@ -270,6 +329,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<bool> SetGameActive(bool isActive)
     {
+        _logger.LogInformation("SetGameActive requested. IsActive={IsActive}", isActive);
         var game = await GetOrCreateCurrentGameAsync();
         game.IsActive = isActive;
         await _db.SaveChangesAsync();
@@ -281,6 +341,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<PrizeImageDto> UploadPrizeImage(int gameId, string base64Image)
     {
+        _logger.LogInformation("UploadPrizeImage requested. GameId={GameId}", gameId);
         var prize = await EnsurePrizeAsync(gameId);
 
         var raw = base64Image;
@@ -311,6 +372,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<bool> DeletePrizeImage(int imageId, int gameId)
     {
+        _logger.LogInformation("DeletePrizeImage requested. GameId={GameId}, ImageId={ImageId}", gameId, imageId);
         var prize = await EnsurePrizeAsync(gameId);
         var image = await _db.PrizeImages.FindAsync(imageId);
         if (image is null) return false;
@@ -326,54 +388,64 @@ public class GameHub : Hub
 
     public async Task ClickButton(int buttonIndex)
     {
-        if (!_gameStarted || _winnerButtonIndex is null)
+        _logger.LogDebug("ClickButton requested. ButtonIndex={ButtonIndex}", buttonIndex);
+        try
         {
-            await Clients.Caller.SendAsync("ClickRejected", "Game not started.");
-            return;
-        }
-
-        int gameId;
-        int? winnerButtonIndex;
-        lock (_lock)
-        {
-            gameId = _currentGameId;
-            winnerButtonIndex = _winnerButtonIndex;
-        }
-
-        var userId = int.Parse(Context.User!.FindFirst("sub")!.Value);
-
-        var result = await _gameService.RegisterClickAsync(gameId, userId, buttonIndex);
-
-        if (!result.Success || result.Value is null)
-        {
-            await Clients.Caller.SendAsync("ClickRejected", result.Error ?? "Erro ao registrar clique.");
-            return;
-        }
-
-        await Clients.All.SendAsync("RankingUpdated", result.Value);
-
-        if (buttonIndex == winnerButtonIndex)
-        {
-            await Clients.All.SendAsync("WinnerConfirmed", new
+            if (!_gameStarted || _winnerButtonIndex is null)
             {
-                gameId,
-                winnerId = userId
-            });
+                await Clients.Caller.SendAsync("ClickRejected", "Game not started.");
+                return;
+            }
 
+            int gameId;
+            int? winnerButtonIndex;
             lock (_lock)
             {
-                _gameStarted = false;
-                _winnerButtonIndex = null;
+                gameId = _currentGameId;
+                winnerButtonIndex = _winnerButtonIndex;
             }
 
-            var game = await _db.Games.FindAsync(gameId);
-            if (game is not null)
+            var userId = int.Parse(Context.User!.FindFirst("sub")!.Value);
+
+            var result = await _gameService.RegisterClickAsync(gameId, userId, buttonIndex);
+
+            if (!result.Success || result.Value is null)
             {
-                game.IsActive = false;
-                game.FinishedAt = DateTime.UtcNow;
-                game.WinnerId = userId;
-                await _db.SaveChangesAsync();
+                _logger.LogWarning("ClickButton rejected: {Error}", result.Error);
+                await Clients.Caller.SendAsync("ClickRejected", result.Error ?? "Erro ao registrar clique.");
+                return;
             }
+
+            await Clients.All.SendAsync("RankingUpdated", result.Value);
+
+            if (buttonIndex == winnerButtonIndex)
+            {
+                await Clients.All.SendAsync("WinnerConfirmed", new
+                {
+                    gameId,
+                    winnerId = userId
+                });
+
+                lock (_lock)
+                {
+                    _gameStarted = false;
+                    _winnerButtonIndex = null;
+                }
+
+                var game = await _db.Games.FindAsync(gameId);
+                if (game is not null)
+                {
+                    game.IsActive = false;
+                    game.FinishedAt = DateTime.UtcNow;
+                    game.WinnerId = userId;
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ClickButton failed.");
+            throw;
         }
     }
 

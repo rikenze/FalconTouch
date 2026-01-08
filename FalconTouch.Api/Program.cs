@@ -72,6 +72,9 @@ builder.Services
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
+// Application Insights
+builder.Services.AddApplicationInsightsTelemetry();
+
 // Swagger com JWT
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
