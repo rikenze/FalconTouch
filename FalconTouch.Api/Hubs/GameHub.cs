@@ -15,6 +15,7 @@ public class GameHub : Hub
     private readonly FalconTouchDbContext _db;
     private readonly ILogger<GameHub> _logger;
 
+    // In-memory state for the current process; not shared across instances.
     private static readonly object _lock = new();
     private static int? _winnerButtonIndex = null;
     private static bool _gameStarted = false;
@@ -49,6 +50,7 @@ public class GameHub : Hub
                 return;
             }
 
+            // Winner is chosen in-memory; the GameStarted event is broadcast via domain events.
             lock (_lock)
             {
                 _winnerButtonIndex = Random.Shared.Next(0, numberOfButtons);
@@ -67,14 +69,14 @@ public class GameHub : Hub
 
     public async Task<GameStatusDto> GetGameStatus()
     {
-        _logger.LogDebug("GetGameStatus requested.");
+        _logger.LogInformation("GetGameStatus requested.");
         var game = await GetOrCreateCurrentGameAsync();
         return new GameStatusDto(game.IsActive);
     }
 
     public async Task<PublicGameDto> GetPublicGame()
     {
-        _logger.LogDebug("GetPublicGame requested.");
+        _logger.LogInformation("GetPublicGame requested.");
         try
         {
             var game = await GetOrCreateCurrentGameAsync();
@@ -97,7 +99,7 @@ public class GameHub : Hub
 
     public async Task<CurrentGameDto> GetCurrentGame()
     {
-        _logger.LogDebug("GetCurrentGame requested.");
+        _logger.LogInformation("GetCurrentGame requested.");
         try
         {
             var game = await GetOrCreateCurrentGameAsync();
@@ -155,7 +157,7 @@ public class GameHub : Hub
 
     public async Task<CouponValidationDto> ValidateCoupon(string code)
     {
-        _logger.LogDebug("ValidateCoupon requested. Code={Code}", code);
+        _logger.LogInformation("ValidateCoupon requested. Code={Code}", code);
         try
         {
             if (string.IsNullOrWhiteSpace(code))
@@ -190,7 +192,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<IReadOnlyList<InfluencerDto>> GetInfluencers()
     {
-        _logger.LogDebug("GetInfluencers requested.");
+        _logger.LogInformation("GetInfluencers requested.");
         var game = await GetOrCreateCurrentGameAsync();
 
         var influencers = await _db.Influencers
@@ -290,7 +292,7 @@ public class GameHub : Hub
     [Authorize(Roles = "Admin")]
     public async Task<AdminConfigDto> GetAdminConfig()
     {
-        _logger.LogDebug("GetAdminConfig requested.");
+        _logger.LogInformation("GetAdminConfig requested.");
         var game = await GetOrCreateCurrentGameAsync();
         var prize = await EnsurePrizeAsync(game.Id);
 
@@ -388,7 +390,7 @@ public class GameHub : Hub
 
     public async Task ClickButton(int buttonIndex)
     {
-        _logger.LogDebug("ClickButton requested. ButtonIndex={ButtonIndex}", buttonIndex);
+        _logger.LogInformation("ClickButton requested. ButtonIndex={ButtonIndex}", buttonIndex);
         try
         {
             if (!_gameStarted || _winnerButtonIndex is null)
@@ -399,6 +401,7 @@ public class GameHub : Hub
 
             int gameId;
             int? winnerButtonIndex;
+            // Snapshot shared state under a lock to avoid races.
             lock (_lock)
             {
                 gameId = _currentGameId;
@@ -432,6 +435,7 @@ public class GameHub : Hub
                     _winnerButtonIndex = null;
                 }
 
+                // Persist winner and close the game once the winning button is found.
                 var game = await _db.Games.FindAsync(gameId);
                 if (game is not null)
                 {
@@ -457,6 +461,7 @@ public class GameHub : Hub
 
         if (game is not null) return game;
 
+        // Seed a default game when none exists yet.
         var created = new Game
         {
             StartedAt = DateTime.UtcNow,
@@ -479,6 +484,7 @@ public class GameHub : Hub
 
         if (prize is not null) return prize;
 
+        // Seed a placeholder prize so the UI can render something.
         var created = new Prize
         {
             GameId = gameId,

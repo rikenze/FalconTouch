@@ -1,4 +1,4 @@
-﻿using FalconTouch.Domain.Entities;
+using FalconTouch.Domain.Entities;
 using FalconTouch.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

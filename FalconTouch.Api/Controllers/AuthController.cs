@@ -1,4 +1,4 @@
-﻿using FalconTouch.Application.Auth;
+using FalconTouch.Application.Auth;
 using FalconTouch.Domain.Entities;
 using FalconTouch.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc;
@@ -50,29 +50,29 @@ public class AuthController : ControllerBase
     {
         var user = await _userRepository.GetUserByEmailAsync(request.Email);
         if (user is null)
-            return NotFound(new { message = "Usuário não encontrado." });
+            return NotFound(new { message = "Usu�rio n�o encontrado." });
 
         var token = GeneratePasswordResetToken(user);
 
-        return Ok(new { message = "Email de recuperação enviado.", token });
+        return Ok(new { message = "Email de recupera��o enviado.", token });
     }
 
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.NewPassword))
-            return BadRequest(new { message = "Token e nova senha são obrigatórios." });
+            return BadRequest(new { message = "Token e nova senha s�o obrigat�rios." });
 
         try
         {
             var principal = ValidatePasswordResetToken(request.Token);
             var userIdClaim = principal.FindFirst("sub")?.Value ?? principal.FindFirst("id")?.Value;
             if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
-                return BadRequest(new { message = "Token inválido." });
+                return BadRequest(new { message = "Token inv�lido." });
 
             var user = await _userRepository.GetUserByIdAsync(userId);
             if (user is null)
-                return NotFound(new { message = "Usuário não encontrado." });
+                return NotFound(new { message = "Usu�rio n�o encontrado." });
 
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             await _userRepository.UpdateUserAsync(user);
@@ -81,7 +81,7 @@ public class AuthController : ControllerBase
         }
         catch
         {
-            return BadRequest(new { message = "Token inválido ou expirado." });
+            return BadRequest(new { message = "Token inv�lido ou expirado." });
         }
     }
 

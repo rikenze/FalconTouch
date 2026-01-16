@@ -1,3 +1,4 @@
+using FalconTouch.Application.Payments;
 using FalconTouch.Domain.Entities;
 using FalconTouch.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -17,18 +18,24 @@ public class PaymentsController : ControllerBase
     private readonly FalconTouchDbContext _db;
     private readonly IHubContext<GameHub> _hub;
     private readonly ILogger<PaymentsController> _logger;
+    private readonly IPaymentProviderFacade _paymentProviders;
 
-    public PaymentsController(FalconTouchDbContext db, IHubContext<GameHub> hub, ILogger<PaymentsController> logger)
+    public PaymentsController(
+        FalconTouchDbContext db,
+        IHubContext<GameHub> hub,
+        ILogger<PaymentsController> logger,
+        IPaymentProviderFacade paymentProviders)
     {
         _db = db;
         _hub = hub;
         _logger = logger;
+        _paymentProviders = paymentProviders;
     }
 
     [HttpGet("check-payment")]
     public async Task<IActionResult> CheckPayment()
     {
-        _logger.LogDebug("CheckPayment requested.");
+        _logger.LogInformation("CheckPayment requested.");
         try
         {
             var idClaim = User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
@@ -73,7 +80,11 @@ public class PaymentsController : ControllerBase
             if (!game.IsActive)
                 return BadRequest(new { message = "Nenhum jogo ativo no momento." });
 
-            var providerPaymentId = Guid.NewGuid().ToString("N");
+            // Delegate provider integration to the facade; store payment locally.
+            var providerResult = await _paymentProviders.CreatePixAsync(
+                PaymentProviderType.Efi,
+                new PixPaymentProviderRequest(request.Amount),
+                HttpContext.RequestAborted);
 
             var payment = new Payment
             {
@@ -81,7 +92,7 @@ public class PaymentsController : ControllerBase
                 GameId = game.Id,
                 Amount = request.Amount,
                 Provider = "Efi",
-                ProviderPaymentId = providerPaymentId,
+                ProviderPaymentId = providerResult.ProviderPaymentId,
                 Status = PaymentStatus.Pending,
                 CouponCode = request.CouponCode,
                 InfluencerId = request.InfluencerId,
@@ -94,9 +105,9 @@ public class PaymentsController : ControllerBase
 
             return Ok(new
             {
-                txid = providerPaymentId,
-                qrcode = "pix-qr-code-placeholder",
-                imagemQrcode = "pix-qr-image-placeholder"
+                txid = providerResult.ProviderPaymentId,
+                qrcode = providerResult.QrCode,
+                imagemQrcode = providerResult.QrCodeImage
             });
         }
         catch (Exception ex)
@@ -109,15 +120,19 @@ public class PaymentsController : ControllerBase
     [HttpPost("create-payment-intent")]
     public async Task<IActionResult> CreatePaymentIntent([FromBody] PaymentIntentRequest request)
     {
-        _logger.LogDebug("CreatePaymentIntent requested. Amount={Amount}", request.Amount);
+        _logger.LogInformation("CreatePaymentIntent requested. Amount={Amount}", request.Amount);
         try
         {
             if (request.Amount <= 0)
                 return BadRequest(new { message = "Valor invalido." });
 
-            // TODO: integrar com Stripe e retornar clientSecret real.
-            var clientSecret = $"mock_{Guid.NewGuid():N}";
-            return Ok(new { clientSecret });
+            // Provider returns a client secret; API only proxies it to the client.
+            var providerResult = await _paymentProviders.CreateCardPaymentIntentAsync(
+                PaymentProviderType.Stripe,
+                new CardPaymentIntentRequest(request.Amount),
+                HttpContext.RequestAborted);
+
+            return Ok(new { clientSecret = providerResult.ClientSecret });
         }
         catch (Exception ex)
         {
@@ -142,19 +157,25 @@ public class PaymentsController : ControllerBase
             if (!game.IsActive)
                 return BadRequest(new { message = "Nenhum jogo ativo no momento." });
 
+            // Provider confirms payment and returns its external id and status.
+            var providerResult = await _paymentProviders.ConfirmCardPaymentAsync(
+                PaymentProviderType.Stripe,
+                new CardPaymentConfirmationRequest(request.Amount, request.ProviderPaymentId),
+                HttpContext.RequestAborted);
+
             var payment = new Payment
             {
                 UserId = userId,
                 GameId = game.Id,
                 Amount = request.Amount,
                 Provider = "Stripe",
-                ProviderPaymentId = request.ProviderPaymentId ?? Guid.NewGuid().ToString("N"),
-                Status = PaymentStatus.Paid,
+                ProviderPaymentId = providerResult.ProviderPaymentId,
+                Status = providerResult.Paid ? PaymentStatus.Paid : PaymentStatus.Failed,
                 CouponCode = request.CouponCode,
                 InfluencerId = request.InfluencerId,
                 CommissionAmount = request.CommissionAmount,
                 DiscountPercent = request.DiscountPercent,
-                PaidAt = DateTime.UtcNow
+                PaidAt = providerResult.Paid ? DateTime.UtcNow : null
             };
 
             _db.Payments.Add(payment);
@@ -183,7 +204,7 @@ public class PaymentsController : ControllerBase
     [HttpGet("pix/status/{txid}")]
     public async Task<IActionResult> GetPixStatus([FromRoute] string txid)
     {
-        _logger.LogDebug("GetPixStatus requested. TxId={TxId}", txid);
+        _logger.LogInformation("GetPixStatus requested. TxId={TxId}", txid);
         try
         {
             var payment = await _db.Payments

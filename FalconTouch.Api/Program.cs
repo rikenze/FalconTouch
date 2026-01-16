@@ -8,7 +8,9 @@ using FalconTouch.Infrastructure.Auth;
 using FalconTouch.Infrastructure.Data;
 using FalconTouch.Infrastructure.Games;
 using FalconTouch.Infrastructure.Payments;
+using FalconTouch.Infrastructure.Payments.Providers;
 using FalconTouch.Infrastructure.Repositories;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -75,6 +77,12 @@ builder.Services.AddControllers();
 // Application Insights
 builder.Services.AddApplicationInsightsTelemetry();
 
+// Configura telemetria
+builder.Services.Configure<TelemetryConfiguration>((config) =>
+{
+    config.TelemetryChannel.DeveloperMode = true; // flush imediato
+});
+
 // Swagger com JWT
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -117,6 +125,10 @@ builder.Services.AddScoped<IGameService, GameService>();
 builder.Services.AddScoped<IGameRepository, GameRepository>();
 builder.Services.AddScoped<IGameEventPublisher, SignalRGameEventPublisher>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
+builder.Services.AddScoped<IPaymentProviderFacade, PaymentProviderFacade>();
+builder.Services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
+builder.Services.AddScoped<IPaymentProvider, EfiPaymentProvider>();
+builder.Services.AddScoped<IPaymentProvider, StripePaymentProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Repositories

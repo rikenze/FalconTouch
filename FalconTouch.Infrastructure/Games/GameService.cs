@@ -69,6 +69,7 @@ public class GameService : IGameService
         await _repository.AddClickAsync(click, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
 
+        // Publish domain events generated inside the aggregate (SignalR uses these).
         foreach (var domainEvent in game.DomainEvents)
         {
             await _eventPublisher.PublishAsync(domainEvent, cancellationToken);
